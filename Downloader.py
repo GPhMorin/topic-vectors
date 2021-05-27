@@ -1,5 +1,8 @@
+from Bio import Entrez
+import certifi
 import os
 import pandas as pd
+import pycurl
 import re
 import requests
 from TableLoader import TableLoader
@@ -10,6 +13,7 @@ import xml.etree.ElementTree as ET
 
 class Downloader(object):
     wd = os.getcwd()
+    pubmed_wd = f"{wd}/pubmed/"
     root = None
     table = None
     pubmed_ids = set()
@@ -22,7 +26,10 @@ class Downloader(object):
         # self.extract_ids()
         self.load_ids()
         self.delta_ids()
-        self.download_content()
+        # self.entrez_download()
+        # self.download_abstracts()
+        # self.download_content()
+        self.download_xml()
 
     def download_table(self):
         self.get_root()
@@ -163,51 +170,68 @@ class Downloader(object):
         self.pmc_ids = pd.read_csv(self.wd + "/pmc/all_ids.csv")
 
     def delta_ids(self):
+        print("Comparing the ID list with the files already downloaded...")
         self.pubmed_ids = self.pubmed_ids.squeeze()
         self.pubmed_ids = self.pubmed_ids.unique().tolist()
         self.pubmed_ids = set(map(str, self.pubmed_ids))
-        for file in os.listdir(self.wd + "/pubmed/"):
-            if file.endswith(".txt"):
-                ID = file.removesuffix(".txt")
+        for file in tqdm(os.listdir(self.wd + "/pubmed/")):
+            if file.endswith("-text.txt"):
+                ID = file[:-9]
                 self.pubmed_ids.remove(ID)
         self.pubmed_ids = list(self.pubmed_ids)
         self.pubmed_ids = pd.DataFrame(self.pubmed_ids)
 
-        self.pmc_ids = self.pmc_ids.squeeze()
-        self.pmc_ids = self.pmc_ids.unique().tolist()
-        self.pmc_ids = set(map(str, self.pmc_ids))
-        for file in os.listdir(self.wd + "/pmc/"):
-            if file.endswith(".txt"):
-                ID = file.removesuffix(".txt")
-                self.pmc_ids.remove(ID)
-        self.pmc_ids = list(self.pmc_ids)
-        self.pmc_ids = pd.DataFrame(self.pmc_ids)
+        # self.pmc_ids = self.pmc_ids.squeeze()
+        # self.pmc_ids = self.pmc_ids.unique().tolist()
+        # self.pmc_ids = set(map(str, self.pmc_ids))
+        # for file in os.listdir(self.wd + "/pmc/"):
+        #     if file.endswith(".xml") and not file.endswith("-esearch.xml"):
+        #         ID = file.removesuffix(".xml")
+        #         self.pmc_ids.remove(ID)
+        # self.pmc_ids = list(self.pmc_ids)
+        # self.pmc_ids = pd.DataFrame(self.pmc_ids)
 
-    def download_content(self):
+    def entrez_download(self):
         print("Downloading abstracts from PubMed...")
-        for index in tqdm(self.pubmed_ids.index):
-            pubmed_id = self.pubmed_ids.iloc[index, 0]
-            url = f'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pubmed_id}&retmode=xml&api_key=15b8d0248116528f9ed88b7e47796350b108'
-            response = requests.get(url, allow_redirects=True)
-            tree = ET.ElementTree(ET.fromstring(response.text))
-            root = tree.getroot()
-            for abstract in root.iter("AbstractText"):
-                with open(self.wd + f"/pubmed/{pubmed_id}.txt", "w", encoding="utf8") as output:
-                    abstract = " ".join(abstract.itertext())
-                    output.write(abstract)
-            time.sleep(0.1)
+        self.pubmed_ids = self.pubmed_ids.squeeze()
+        self.pubmed_ids = self.pubmed_ids.tolist()
+        Entrez.email = "gilles-philippe.morin1@uqac.ca"
+        Entrez.api_key = "15b8d0248116528f9ed88b7e47796350b108"
+        for ID in tqdm(self.pubmed_ids):
+            handle = Entrez.efetch(db="pubmed", id=ID, rettype="abstract", retmode="xml").read().decode("utf8")
+            text = re.sub(r'\n', "", handle)
+            with open(self.pubmed_wd + f"{ID}-text.txt", "w", encoding="utf8") as outfile:
+                outfile.write(text)
+
+    def download_abstracts(self):
+        print("Downloading abstracts from PubMed...")
+        self.pubmed_ids = self.pubmed_ids.squeeze()
+        self.pubmed_ids = self.pubmed_ids.tolist()
+        curl = pycurl.Curl()
+        curl.setopt(pycurl.CAINFO, certifi.where())
+        for ID in tqdm(self.pubmed_ids):
+            url = f'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={ID}&rettype=abstract&retmode=text&api_key=15b8d0248116528f9ed88b7e47796350b108'
+            curl.setopt(pycurl.URL, url)
+            with open(self.pubmed_wd + f"{ID}-text.txt", "wb") as outfile:
+                curl.setopt(pycurl.WRITEDATA, outfile)
+                curl.perform()
+        curl.close()
         print("Done.")
 
-        print("Downloading articles from PubMed Central...")
-        for index in self.pmc_ids.index:
-            pmc_id = self.pmc_ids.iloc[index, 0]
-            url = f'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=PMC&id={pmc_id}&retmode=xml&api_key=15b8d0248116528f9ed88b7e47796350b108'
-            response = requests.get(url, allow_redirects=True)
-            tree = ET.ElementTree(ET.fromstring(response.text))
-            root = tree.getroot()
-            for body in root.iter("body"):
-                with open(self.wd + f"/pubmed/{pmc_id}.txt", "w", encoding="utf8") as output:
-                    body = " ".join(body.itertext())
-                    output.write(body)
-            time.sleep(0.1)
+    def download_xml(self):
+        print("Downloading XML files from PubMed...")
+        self.pubmed_ids = self.pubmed_ids.squeeze()
+        self.pubmed_ids = self.pubmed_ids.tolits()
+        curl = pycurl.Curl()
+        curl.setopt(pycurl.CAINFO, certifi.where())
+        for ID in tqdm(self.pubmed_ids):
+            try:
+                url = f'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={ID}&retmode=xml&api_key=15b8d0248116528f9ed88b7e47796350b108'
+                curl.setopt(pycurl.URL, url)
+                with open(self.pubmed_wd + f"{ID}-full.xml", "wb") as file:
+                    curl.setopt(pycurl.WRITEDATA, file)
+                    curl.perform()
+            except pycurl.error:
+                pass
+        curl.close()
         print("Done.")
