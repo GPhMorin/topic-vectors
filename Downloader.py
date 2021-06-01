@@ -1,4 +1,3 @@
-from Bio import Entrez
 import certifi
 import os
 import pandas as pd
@@ -27,8 +26,6 @@ class Downloader(object):
         self.load_ids()
         self.delta_ids()
         # self.entrez_download()
-        # self.download_abstracts()
-        # self.download_content()
         self.download_xml()
 
     def download_table(self):
@@ -167,61 +164,19 @@ class Downloader(object):
 
     def load_ids(self):
         self.pubmed_ids = pd.read_csv(self.wd + "/pubmed/all_ids.csv")
-        self.pmc_ids = pd.read_csv(self.wd + "/pmc/all_ids.csv")
+        self.pubmed_ids = self.pubmed_ids.squeeze()
+        self.pubmed_ids = self.pubmed_ids.tolist()
+        self.pubmed_ids = set(map(str, self.pubmed_ids))
 
     def delta_ids(self):
         print("Comparing the ID list with the files already downloaded...")
-        self.pubmed_ids = self.pubmed_ids.squeeze()
-        self.pubmed_ids = self.pubmed_ids.unique().tolist()
-        self.pubmed_ids = set(map(str, self.pubmed_ids))
         for file in tqdm(os.listdir(self.wd + "/pubmed/")):
-            if file.endswith("-text.txt"):
+            if file.endswith("-full.xml"):
                 ID = file[:-9]
                 self.pubmed_ids.remove(ID)
-        self.pubmed_ids = list(self.pubmed_ids)
-        self.pubmed_ids = pd.DataFrame(self.pubmed_ids)
-
-        # self.pmc_ids = self.pmc_ids.squeeze()
-        # self.pmc_ids = self.pmc_ids.unique().tolist()
-        # self.pmc_ids = set(map(str, self.pmc_ids))
-        # for file in os.listdir(self.wd + "/pmc/"):
-        #     if file.endswith(".xml") and not file.endswith("-esearch.xml"):
-        #         ID = file.removesuffix(".xml")
-        #         self.pmc_ids.remove(ID)
-        # self.pmc_ids = list(self.pmc_ids)
-        # self.pmc_ids = pd.DataFrame(self.pmc_ids)
-
-    def entrez_download(self):
-        print("Downloading abstracts from PubMed...")
-        self.pubmed_ids = self.pubmed_ids.squeeze()
-        self.pubmed_ids = self.pubmed_ids.tolist()
-        Entrez.email = "gilles-philippe.morin1@uqac.ca"
-        Entrez.api_key = "15b8d0248116528f9ed88b7e47796350b108"
-        for ID in tqdm(self.pubmed_ids):
-            handle = Entrez.efetch(db="pubmed", id=ID, rettype="abstract", retmode="xml").read().decode("utf8")
-            text = re.sub(r'\n', "", handle)
-            with open(self.pubmed_wd + f"{ID}-text.txt", "w", encoding="utf8") as outfile:
-                outfile.write(text)
-
-    def download_abstracts(self):
-        print("Downloading abstracts from PubMed...")
-        self.pubmed_ids = self.pubmed_ids.squeeze()
-        self.pubmed_ids = self.pubmed_ids.tolist()
-        curl = pycurl.Curl()
-        curl.setopt(pycurl.CAINFO, certifi.where())
-        for ID in tqdm(self.pubmed_ids):
-            url = f'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={ID}&rettype=abstract&retmode=text&api_key=15b8d0248116528f9ed88b7e47796350b108'
-            curl.setopt(pycurl.URL, url)
-            with open(self.pubmed_wd + f"{ID}-text.txt", "wb") as outfile:
-                curl.setopt(pycurl.WRITEDATA, outfile)
-                curl.perform()
-        curl.close()
-        print("Done.")
 
     def download_xml(self):
         print("Downloading XML files from PubMed...")
-        self.pubmed_ids = self.pubmed_ids.squeeze()
-        self.pubmed_ids = self.pubmed_ids.tolits()
         curl = pycurl.Curl()
         curl.setopt(pycurl.CAINFO, certifi.where())
         for ID in tqdm(self.pubmed_ids):
@@ -231,7 +186,9 @@ class Downloader(object):
                 with open(self.pubmed_wd + f"{ID}-full.xml", "wb") as file:
                     curl.setopt(pycurl.WRITEDATA, file)
                     curl.perform()
+                time.sleep(0.0375)
             except pycurl.error:
+                time.sleep(0.0375)
                 pass
         curl.close()
         print("Done.")
