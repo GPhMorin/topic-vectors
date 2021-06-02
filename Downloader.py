@@ -3,11 +3,15 @@ import os
 import pandas as pd
 import pycurl
 import re
-import requests
 from TableLoader import TableLoader
 import time
 from tqdm import tqdm
 import xml.etree.ElementTree as ET
+
+"""
+This file needs PycURL to run. The latest version of Python (3.9)
+cannot run it at the time of writing this line. I used Python 3.8.
+"""
 
 
 class Downloader(object):
@@ -22,11 +26,10 @@ class Downloader(object):
         # self.download_table()  # Downloads
         table_loader = TableLoader()
         self.table = table_loader.table
-        # self.extract_ids()
+        self.extract_ids()
         self.load_ids()
         self.delta_ids()
-        # self.entrez_download()
-        self.download_xml()
+        self.download_xml()  # Downloads
 
     def download_table(self):
         self.get_root()
@@ -39,8 +42,11 @@ class Downloader(object):
         self.save_table()
 
     def get_root(self):
-        tree = ET.parse("en_product7.xml")
-        self.root = tree.getroot()
+        with open("en_product7.xml",
+                  "rb") as infile:  # http://www.orphadata.org/cgi-bin/rare_free.html Linearisation of Disorders
+            parser = ET.XMLParser(encoding="iso-8859-1")
+            tree = ET.parse(infile, parser)
+            self.root = tree.getroot()
 
     def get_names(self):
         name_list = list()
@@ -60,12 +66,16 @@ class Downloader(object):
 
     def download_orphanet(self):
         print("Downloading Orphanet web pages...")
+        curl = pycurl.Curl()
+        curl.setopt(pycurl.CAINFO, certifi.where())
         for index in tqdm(self.table.index):
             orphacode = self.table.iloc[index, 1]
             url = f'https://www.orpha.net/consor/cgi-bin/OC_Exp.php?Expert={orphacode}'
-            response = requests.get(url, allow_redirects=True)
-            with open(self.wd + f"/orphanet/{orphacode}.html", "wb") as output:
-                output.write(response.content)
+            curl.setopt(pycurl.URL, url)
+            with open(self.wd + f"/orphanet/{orphacode}.html", "wb") as file:
+                curl.setopt(pycurl.WRITEDATA, file)
+                curl.perform()
+        curl.close()
         print("Done.")
 
     def get_queries(self):
@@ -83,7 +93,6 @@ class Downloader(object):
                 query_list.append(query)
             else:
                 query_list.append(None)
-
         query_list = pd.DataFrame(query_list)
         query_list.columns = ['Query']
         self.table = self.table.merge(query_list, left_index=True, right_index=True)
@@ -91,19 +100,24 @@ class Downloader(object):
 
     def get_esearches(self):
         print("Downloading esearch results...")
+        curl = pycurl.Curl()
+        curl.setopt(pycurl.CAINFO, certifi.where())
+        curl.setopt(pycurl.FOLLOWLOCATION, True)
         for index in tqdm(self.table.index):
             query = self.table.iloc[index, 2]
             if query is not None:
                 orphacode = self.table.iloc[index, 1]
-                url_pubmed = f'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={query}&retmax=100000'
-                response_pubmed = requests.get(url_pubmed, allow_redirects=True)
+                url_pubmed = f'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={query}&retmax=100000&api_key=15b8d0248116528f9ed88b7e47796350b108'
+                curl.setopt(pycurl.URL, url_pubmed)
                 with open(self.wd + f"/pubmed/{orphacode}-esearch.xml", "wb") as file_pubmed:
-                    file_pubmed.write(response_pubmed.content)
-                url_pmc = f'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=PMC&term={query}&retmax=100000'
-                response_pmc = requests.get(url_pmc, allow_redirects=True)
+                    curl.setopt(pycurl.WRITEDATA, file_pubmed)
+                    curl.perform()
+                url_pmc = f'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=PMC&term={query}&retmax=100000&api_key=15b8d0248116528f9ed88b7e47796350b108'
+                curl.setopt(pycurl.URL, url_pmc)
                 with open(self.wd + f"/pmc/{orphacode}-esearch.xml", "wb") as file_pmc:
-                    file_pmc.write(response_pmc.content)
-                time.sleep(0.4)
+                    curl.setopt(pycurl.WRITEDATA, file_pmc)
+                    curl.perform()
+        curl.close()
         print("Done.")
 
     def get_counts(self):
@@ -125,7 +139,7 @@ class Downloader(object):
         print("Done.")
 
     def save_table(self):
-        self.table.to_csv("rare_diseases.csv", index=False)
+        self.table.to_csv("rare_diseases.csv", index=False, encoding="utf8")
 
     def extract_ids(self):
         print("Extracting IDs from PubMed...")
@@ -186,9 +200,9 @@ class Downloader(object):
                 with open(self.pubmed_wd + f"{ID}-full.xml", "wb") as file:
                     curl.setopt(pycurl.WRITEDATA, file)
                     curl.perform()
-                time.sleep(0.0375)
+                time.sleep(0.0375)  # Adjust to get to max 10 iterations per second
             except pycurl.error:
-                time.sleep(0.0375)
+                time.sleep(0.0375)  # Adjust to get to max 10 iterations per second
                 pass
         curl.close()
         print("Done.")
